@@ -16,6 +16,10 @@ jobs:
         with:
           r-version: "4.1.1"
 
+      - name: Validate CRAN Connection
+        run: |
+          Rscript -e 'if (!curl::has_internet()) stop("No internet connection available.")'
+
       - name: Set CRAN Repository
         run: |
           Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
@@ -24,7 +28,7 @@ jobs:
         run: |
           Rscript -e 'install.packages(c("devtools"), repos = "https://cloud.r-project.org")'
 
-      - name: Install Dependencies
+      - name: Install Dependencies with Logs
         run: |
           Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"), verbose = TRUE)'
           Rscript -e 'install.packages("rcmdcheck", dependencies = TRUE)'
