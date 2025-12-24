@@ -9,10 +9,10 @@ permissions:
 
 jobs:
   matrix_build:
-    runs-on: ubuntu-latest  # Cambia a macos-latest si persisten los problemas
+    runs-on: ubuntu-latest  # Cambia a macos-latest si es necesario
     strategy:
       matrix:
-        r-version: ['4.1.1', '4.2.2']
+        r-version: ['4.1.1', '4.2.2']  # Verifica compatibilidad
 
     steps:
       - name: Checkout Repository
@@ -32,15 +32,17 @@ jobs:
         with:
           r-version: ${{ matrix.r-version }}
 
-      - name: Test Internet Connection
+      - name: Install curl Package
         run: |
-          Rscript -e 'if (!curl::has_internet()) stop("No internet connection.")'
+          Rscript -e 'install.packages("curl", repos = "https://cloud.r-project.org")'
 
-      - name: Install Dependencies
+      - name: Verify Installed Packages
         run: |
-          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
-          Rscript -e 'install.packages(c("curl", "httr", "remotes", "rcmdcheck"))'
-          Rscript -e 'remotes::install_deps(dependencies = TRUE)'
+          Rscript -e 'if (!requireNamespace("curl", quietly = TRUE)) stop("Package curl is not installed.")'
+
+      - name: Install Additional Dependencies
+        run: |
+          Rscript -e 'install.packages(c("httr", "remotes", "rcmdcheck"), repos = "https://cloud.r-project.org")'
 
       - name: Enhanced Logging
         run: |
