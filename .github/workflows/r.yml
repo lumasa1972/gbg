@@ -25,7 +25,7 @@ jobs:
         run: |
           Rscript -e 'install.packages(c("systemfonts", "textshaping"), repos = "https://cloud.r-project.org")'
 
-      - name: Install Dependencies with Logs
+      - name: Install rcmdcheck with Logs
         run: |
           Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"), verbose = TRUE)'
           Rscript -e 'install.packages("rcmdcheck", dependencies = TRUE, repos = "https://cloud.r-project.org")'
