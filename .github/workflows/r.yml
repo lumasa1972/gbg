@@ -1,4 +1,4 @@
-name: R Workflow with Automated Changes
+name: R Workflow
 
 on:
   push:
@@ -7,18 +7,20 @@ on:
     branches: [ "main" ]
 
 permissions:
-  contents: write  # Cambia a 'write' para permitir actualizar archivos en el repositorio
+  contents: write # Permite escribir en el repositorio si es necesario
 
 jobs:
-  build:
-    runs-on: macos-latest
+  matrix_build:
+    runs-on: ubuntu-latest # Cambiado para mayor compatibilidad
     strategy:
       matrix:
-        r-version: ['3.6.3', '4.1.1']
+        r-version: ['4.1.1', '4.2.2'] # Usamos versiones modernas y compatibles
+    fail-fast: false # Evitamos que un error detenga las demás tareas
 
     steps:
       # 1. Clonar el repositorio
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       # 2. Configurar R
       - name: Set up R ${{ matrix.r-version }}
@@ -26,28 +28,27 @@ jobs:
         with:
           r-version: ${{ matrix.r-version }}
 
-      # 3. Instalar dependencias
+      # 3. Instalar Dependencias
       - name: Install dependencies
         run: |
-          install.packages(c("remotes", "rcmdcheck"))
-          remotes::install_deps(dependencies = TRUE)
-        shell: Rscript {0}
+          Rscript -e 'install.packages(c("remotes", "rcmdcheck"))'
+          Rscript -e 'remotes::install_deps(dependencies = TRUE)'
 
-      # 4. Chequeos del proyecto
-      - name: Check
-        run: rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")
-        shell: Rscript {0}
+      # 4. Verificar Proyecto
+      - name: Check Project
+        run: |
+          Rscript -e 'rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")'
 
-      # 5. Modificar y actualizar el archivo app.R automáticamente
+      # 5. Modificar el Archivo app.R (Ejemplo)
       - name: Update app.R file
         run: |
-          echo "# Actualizando app.R dinámicamente" > app.R
-          echo "# Nuevo contenido del archivo aquí:" >> app.R
+          echo "# Actualizando archivo app.R automáticamente" > app.R
           echo "library(shiny)" >> app.R
-          # Agrega más comandos echo para el contenido necesario
-        shell: bash
+          echo 'ui <- fluidPage("Hola, mundo!")' >> app.R
+          echo 'server <- function(input, output) {}' >> app.R
+          echo 'shinyApp(ui, server)' >> app.R
 
-      # 6. Hacer commit y push de los cambios
+      # 6. Commit y Push Automático
       - name: Commit and push changes
         run: |
           git config user.name "GitHub Actions Bot"
