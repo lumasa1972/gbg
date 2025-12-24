@@ -29,18 +29,17 @@ jobs:
         run: |
           Rscript --version || echo "R installation failed."
 
-      - name: Install curl Package
+      - name: Install Dependencies for rcmdcheck
         run: |
-          Rscript -e 'install.packages("curl", lib="/home/runner/work/_temp/Rlibs", dependencies = TRUE, repos = "https://cloud.r-project.org")'
-      
-      # Verificar que el paquete curl se haya instalado correctamente
-      - name: Verify curl Installation
-        run: |
-          Rscript -e 'if ("curl" %in% rownames(installed.packages())) {cat("curl is installed successfully.")} else {cat("curl installation failed.")}'
+          Rscript -e 'install.packages(c("httr", "jsonlite"), lib="/home/runner/work/_temp/Rlibs", repos = "https://cloud.r-project.org")'
 
-      - name: Verify R Library Path
+      - name: Install rcmdcheck
         run: |
-          Rscript -e '.libPaths()'
+          Rscript -e 'install.packages("rcmdcheck", lib="/home/runner/work/_temp/Rlibs", dependencies = TRUE, repos = "https://cloud.r-project.org")'
+      
+      - name: Verify rcmdcheck Installation
+        run: |
+          Rscript -e 'if (!("rcmdcheck" %in% rownames(installed.packages(lib.loc="/home/runner/work/_temp/Rlibs")))) stop("rcmdcheck installation failed.")'
 
       - name: Check Package
         run: |
