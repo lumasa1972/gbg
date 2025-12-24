@@ -29,12 +29,18 @@ jobs:
         run: |
           Rscript --version || echo "R installation failed."
 
+      - name: Force Library Path
+        run: |
+          Rscript -e 'Sys.setenv(R_LIBS_USER = "/home/runner/work/_temp/Rlibs")'
+          Rscript -e '.libPaths(Sys.getenv("R_LIBS_USER"))'
+
       - name: Install Dependencies for rcmdcheck
         run: |
-          Rscript -e 'install.packages(c("httr", "jsonlite"), lib="/home/runner/work/_temp/Rlibs", repos = "https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("httr", "jsonlite", "cli", "glue"), lib="/home/runner/work/_temp/Rlibs", repos = "https://cloud.r-project.org")'
 
-      - name: Install rcmdcheck
+      - name: Install rcmdcheck with Logging
         run: |
+          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"), verbose = TRUE)'
           Rscript -e 'install.packages("rcmdcheck", lib="/home/runner/work/_temp/Rlibs", dependencies = TRUE, repos = "https://cloud.r-project.org")'
       
       - name: Verify rcmdcheck Installation
@@ -43,4 +49,6 @@ jobs:
 
       - name: Check Package
         run: |
+          Rscript -e 'Sys.setenv(R_LIBS_USER = "/home/runner/work/_temp/Rlibs")'
+          Rscript -e '.libPaths(Sys.getenv("R_LIBS_USER"))'
           Rscript -e 'rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")'
