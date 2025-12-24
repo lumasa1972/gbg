@@ -3,6 +3,8 @@ name: R Workflow
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 permissions:
   contents: write
@@ -24,12 +26,15 @@ jobs:
           r-version: ${{ matrix.r-version }}
 
       - name: Install dependencies
+        env:  # Pasar el token al entorno
+          GITHUB_PAT: ${{ secrets.PAT_TOKEN }}
         run: |
+          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
           Rscript -e 'install.packages(c("remotes", "rcmdcheck"))'
           Rscript -e 'remotes::install_deps(dependencies = TRUE)'
-          Rscript -e 'install.packages(c("curl", "httr"))'
 
       - name: Check Project
+        env:
+          GITHUB_PAT: ${{ secrets.PAT_TOKEN }}
         run: |
-          Rscript -e 'if (!curl::has_internet()) stop("No internet connection.")'
           Rscript -e 'rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")'
