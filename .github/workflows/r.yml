@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,9 +19,17 @@ jobs:
         with:
           r-version: "4.1.1"
 
+      - name: Set CRAN Repository
+        run: |
+          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
+
       - name: Install Dependencies
         run: |
-          Rscript -e 'install.packages(c("httr", "remotes", "rcmdcheck"), repos = "https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("rcmdcheck"), repos = "https://cloud.r-project.org")'
+
+      - name: Verify rcmdcheck Installation
+        run: |
+          Rscript -e 'if (!requireNamespace("rcmdcheck", quietly = TRUE)) stop("Package rcmdcheck not installed.")'
 
       - name: Check Package
         run: |
