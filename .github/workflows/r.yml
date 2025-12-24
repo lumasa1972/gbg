@@ -11,18 +11,19 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      - name: Install System Libraries
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libcurl4-openssl-dev
+
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: "4.1.1"
 
-      - name: Install curl Package
-        run: |
-          Rscript -e 'install.packages("curl", repos = "https://cloud.r-project.org")'
-
       - name: Install Base Dependencies
         run: |
-          Rscript -e 'install.packages(c("httr", "remotes", "curl"), repos = "https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("curl", "httr", "remotes"), dependencies = TRUE, repos = "https://cloud.r-project.org")'
 
       - name: Validate CRAN Connection
         run: |
@@ -32,11 +33,7 @@ jobs:
         run: |
           Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
 
-      - name: Install Dev Tools
-        run: |
-          Rscript -e 'install.packages(c("devtools"), repos = "https://cloud.r-project.org")'
-
-      - name: Install Dependencies
+      - name: Install Dependencies with Logging
         run: |
           Rscript -e 'install.packages(c("rcmdcheck"), dependencies = TRUE, repos = "https://cloud.r-project.org")'
 
