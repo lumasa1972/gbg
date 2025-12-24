@@ -9,14 +9,19 @@ permissions:
 
 jobs:
   matrix_build:
-    runs-on: ubuntu-latest  # Cambia a macos-latest si es necesario
+    runs-on: ubuntu-latest  # Cambia a macos-latest si persisten los problemas
     strategy:
       matrix:
-        r-version: ['4.1.1', '4.2.2']  # Verifica compatibilidad
+        r-version: ['4.1.1', '4.2.2']
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev
 
       - name: Install R
         run: |
@@ -35,6 +40,10 @@ jobs:
       - name: Install curl Package
         run: |
           Rscript -e 'install.packages("curl", repos = "https://cloud.r-project.org")'
+
+      - name: List Installed Packages
+        run: |
+          Rscript -e 'installed.packages()[, c("Package", "Version")]'
 
       - name: Verify Installed Packages
         run: |
