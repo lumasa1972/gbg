@@ -7,48 +7,58 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      RLIBS_PATH: /home/runner/work/_temp/Rlibs
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install System Libraries
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y libcurl4-openssl-dev libssl-dev
-
-      - name: Configure R Library Path
-        run: |
-          export R_LIBS_USER="/home/runner/work/_temp/Rlibs"
-          mkdir -p $R_LIBS_USER
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
 
       - name: Install R
         run: |
+          sudo apt-get update -y
           sudo apt-get install -y r-base
 
-      - name: Verify R Installation
+      - name: Create Library Directory
         run: |
-          Rscript --version || echo "R installation failed."
+          mkdir -p "$RLIBS_PATH"
+          Rscript -e 'dir.create(Sys.getenv("RLIBS_PATH"), showWarnings=FALSE, recursive=TRUE)'
 
-      - name: Force Library Path
-        run: |
-          Rscript -e 'Sys.setenv(R_LIBS_USER = "/home/runner/work/_temp/Rlibs")'
-          Rscript -e '.libPaths(Sys.getenv("R_LIBS_USER"))'
+      # Cache (una sola vez). Se restaura al inicio y se guarda al final automáticamente.
+      - name: Cache R packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.RLIBS_PATH }}
+            ~/.cache/R
+          key: ${{ runner.os }}-r-${{ hashFiles('DESCRIPTION') }}
+          restore-keys: |
+            ${{ runner.os }}-r-
 
-      - name: Install Dependencies for rcmdcheck
+      - name: Display Library Paths
         run: |
-          Rscript -e 'install.packages(c("httr", "jsonlite", "cli", "glue"), lib="/home/runner/work/_temp/Rlibs", repos = "https://cloud.r-project.org")'
+          Rscript -e 'cat("LIBPATHS:\n"); print(.libPaths())'
 
-      - name: Install rcmdcheck with Logging
+      - name: Install rcmdcheck
         run: |
-          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"), verbose = TRUE)'
-          Rscript -e 'install.packages("rcmdcheck", lib="/home/runner/work/_temp/Rlibs", dependencies = TRUE, repos = "https://cloud.r-project.org")'
-      
+          Rscript -e 'lib <- Sys.getenv("RLIBS_PATH");
+                      .libPaths(c(lib, .libPaths()));
+                      install.packages("rcmdcheck", lib=lib, dependencies=TRUE, repos="https://cloud.r-project.org")'
+
       - name: Verify rcmdcheck Installation
         run: |
-          Rscript -e 'if (!("rcmdcheck" %in% rownames(installed.packages(lib.loc="/home/runner/work/_temp/Rlibs")))) stop("rcmdcheck installation failed.")'
+          Rscript -e 'lib <- Sys.getenv("RLIBS_PATH");
+                      .libPaths(c(lib, .libPaths()));
+                      library(rcmdcheck);
+                      cat("rcmdcheck OK\n")'
 
       - name: Check Package
         run: |
-          Rscript -e 'Sys.setenv(R_LIBS_USER = "/home/runner/work/_temp/Rlibs")'
-          Rscript -e '.libPaths(Sys.getenv("R_LIBS_USER"))'
-          Rscript -e 'rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")'
+          Rscript -e 'lib <- Sys.getenv("RLIBS_PATH");
+                      .libPaths(c(lib, .libPaths()));
+                      rcmdcheck::rcmdcheck(path=".", args=c("--no-manual","--as-cran"), error_on="error")'
