@@ -9,22 +9,18 @@ permissions:
 
 jobs:
   matrix_build:
-    runs-on: ubuntu-latest  # Cambiar si se requiere macos-latest
+    runs-on: ubuntu-latest  # Cambia a macos-latest si es necesario
     strategy:
       matrix:
-        r-version: ['4.1.1', '4.2.2']  # Usar versiones verificadas
+        r-version: ['4.1.1', '4.2.2']  # Elimina versiones problemáticas si persiste el error
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Prepare System
+      - name: Test Internet Connection
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libcurl4-gnutls-dev libxml2-dev libssl-dev
-
-      - name: Verify R Installation
-        run: Rscript --version || echo "R is not installed correctly."
+          Rscript -e 'if (!curl::has_internet()) stop("No internet connection.")'
 
       - name: Set up R ${{ matrix.r-version }}
         uses: r-lib/actions/setup-r@v2
