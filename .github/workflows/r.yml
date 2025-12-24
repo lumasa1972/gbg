@@ -14,28 +14,21 @@ jobs:
       - name: Install System Libraries
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y libcurl4-openssl-dev
+          sudo apt-get install -y libharfbuzz-dev libfribidi-dev libpng-dev libfreetype6-dev
 
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: "4.1.1"
 
-      - name: Install Base Dependencies
+      - name: Install Specific Dependencies
         run: |
-          Rscript -e 'install.packages(c("curl", "httr", "remotes"), dependencies = TRUE, repos = "https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("systemfonts", "textshaping"), repos = "https://cloud.r-project.org")'
 
-      - name: Validate CRAN Connection
+      - name: Install Dependencies with Logs
         run: |
-          Rscript -e 'if (!curl::has_internet()) stop("No internet connection available.")'
-
-      - name: Set CRAN Repository
-        run: |
-          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
-
-      - name: Install Dependencies with Logging
-        run: |
-          Rscript -e 'install.packages(c("rcmdcheck"), dependencies = TRUE, repos = "https://cloud.r-project.org")'
+          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"), verbose = TRUE)'
+          Rscript -e 'install.packages("rcmdcheck", dependencies = TRUE, repos = "https://cloud.r-project.org")'
 
       - name: Verify rcmdcheck Installation
         run: |
