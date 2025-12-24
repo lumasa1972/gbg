@@ -16,30 +16,31 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y libcurl4-openssl-dev libssl-dev
 
+      - name: Configure R Library Path
+        run: |
+          export R_LIBS_USER="/home/runner/work/_temp/Rlibs"
+          mkdir -p $R_LIBS_USER
+
       - name: Install R
         run: |
-          sudo apt-get update -y
           sudo apt-get install -y r-base
-
-      - name: Configure PATH for R
-        run: |
-          export PATH="/usr/bin:$PATH"
 
       - name: Verify R Installation
         run: |
           Rscript --version || echo "R installation failed."
 
-      - name: Validate CRAN Repository
+      - name: Install curl Package
         run: |
-          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
+          Rscript -e 'install.packages("curl", lib="/home/runner/work/_temp/Rlibs", dependencies = TRUE, repos = "https://cloud.r-project.org")'
+      
+      # Verificar que el paquete curl se haya instalado correctamente
+      - name: Verify curl Installation
+        run: |
+          Rscript -e 'if ("curl" %in% rownames(installed.packages())) {cat("curl is installed successfully.")} else {cat("curl installation failed.")}'
 
-      - name: Install Dependencies
+      - name: Verify R Library Path
         run: |
-          Rscript -e 'install.packages("curl", dependencies = TRUE, repos = "https://cloud.r-project.org")'
-
-      - name: Verify Dependency Installation
-        run: |
-          Rscript -e 'if (!requireNamespace("curl", quietly = TRUE)) stop("Package curl not installed.")'
+          Rscript -e '.libPaths()'
 
       - name: Check Package
         run: |
