@@ -1,0 +1,59 @@
+name: R Workflow with Automated Changes
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write  # Cambia a 'write' para permitir actualizar archivos en el repositorio
+
+jobs:
+  build:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        r-version: ['3.6.3', '4.1.1']
+
+    steps:
+      # 1. Clonar el repositorio
+      - uses: actions/checkout@v4
+
+      # 2. Configurar R
+      - name: Set up R ${{ matrix.r-version }}
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.r-version }}
+
+      # 3. Instalar dependencias
+      - name: Install dependencies
+        run: |
+          install.packages(c("remotes", "rcmdcheck"))
+          remotes::install_deps(dependencies = TRUE)
+        shell: Rscript {0}
+
+      # 4. Chequeos del proyecto
+      - name: Check
+        run: rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")
+        shell: Rscript {0}
+
+      # 5. Modificar y actualizar el archivo app.R automáticamente
+      - name: Update app.R file
+        run: |
+          echo "# Actualizando app.R dinámicamente" > app.R
+          echo "# Nuevo contenido del archivo aquí:" >> app.R
+          echo "library(shiny)" >> app.R
+          # Agrega más comandos echo para el contenido necesario
+        shell: bash
+
+      # 6. Hacer commit y push de los cambios
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add app.R
+          git commit -m "Actualizar archivo app.R automáticamente desde workflow"
+          git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
