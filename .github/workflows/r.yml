@@ -3,8 +3,6 @@ name: R Workflow
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 permissions:
   contents: write
@@ -14,27 +12,23 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        r-version: ['4.1.1', '4.2.2']
+        r-version: ['4.1.1', '4.2.2']  # Usar solo versiones compatibles
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v3
+
+      - name: Test Internet Connection
+        run: |
+          Rscript -e 'if (!curl::has_internet()) stop("No internet connection.")'
 
       - name: Set up R ${{ matrix.r-version }}
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ matrix.r-version }}
 
-      - name: Install dependencies
-        env:  # Pasar el token al entorno
-          GITHUB_PAT: ${{ secrets.PAT_TOKEN }}
+      - name: Install Dependencies and Check Project
         run: |
-          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org"))'
-          Rscript -e 'install.packages(c("remotes", "rcmdcheck"))'
+          Rscript -e 'install.packages(c("curl", "httr", "remotes", "rcmdcheck"))'
           Rscript -e 'remotes::install_deps(dependencies = TRUE)'
-
-      - name: Check Project
-        env:
-          GITHUB_PAT: ${{ secrets.PAT_TOKEN }}
-        run: |
           Rscript -e 'rcmdcheck::rcmdcheck(args = "--no-manual", error_on = "error")'
