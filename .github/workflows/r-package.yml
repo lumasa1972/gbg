@@ -1,0 +1,62 @@
+name: R Package and Shiny App Check
+
+on:
+  push:
+    branches: [ "main", "copilot/**" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  R-CMD-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.0'
+          use-public-rspm: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libgdal-dev \
+            libgeos-dev \
+            libproj-dev \
+            libudunits2-dev
+
+      - name: Setup R dependencies cache
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rcmdcheck
+            any::roxygen2
+            any::devtools
+          needs: check
+
+      - name: Check package
+        uses: r-lib/actions/check-r-package@v2
+        with:
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"error"'
+
+      - name: Test Shiny App Loading
+        run: |
+          Rscript -e '
+            library(gbg)
+            app_dir <- system.file("shiny", package = "gbg")
+            if (app_dir == "") stop("Shiny app directory not found")
+            if (!file.exists(file.path(app_dir, "app.R"))) stop("app.R not found")
+            cat("✓ Shiny app files found successfully\n")
+          '
+
+      - name: Session Info
+        run: |
+          Rscript -e 'sessionInfo()'

@@ -1,8 +1,33 @@
 Package: gbg
-Title: Dashboard GBG Analysis
-Version: 0.0.0.9000
-Author: Tu Nombre <mariano>
-Maintainer: Tu Nombre <marianoarroyo@gmail.com>
-Description: Herramientas para generar dashboards utilizando R.
-License: MIT
+Title: Dashboard GBG Epidemiological Analysis
+Version: 0.1.0
+Authors@R: 
+    person("Mariano", "Arroyo", email = "marianoarroyo@gmail.com", role = c("aut", "cre"))
+Description: Herramientas para análisis de datos epidemiológicos de GBG (SENASA).
+    Incluye funciones para normalización de datos, visualización y un dashboard
+    interactivo Shiny para análisis epidemiológico.
+License: MIT + file LICENSE
+Encoding: UTF-8
 LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Depends:
+    R (>= 4.0.0)
+Imports:
+    shiny (>= 1.7.0),
+    shinydashboard,
+    dplyr,
+    ggplot2,
+    readr,
+    stringi,
+    sf,
+    leaflet,
+    rlang
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+URL: https://github.com/lumasa1972/gbg
+BugReports: https://github.com/lumasa1972/gbg/issues

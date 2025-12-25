@@ -1,13 +1,6 @@
 # =========================================================
-# app_gbg_dashboard_full.R
-# Dashboard epidemiológico GBG (SENASA) – versión "todo":
-# - Filtros + botón Procesar (eventReactive)
-# - KPI (acumulados, nuevos, cantones con casos, registros)
-# - Serie semanal (comparativo por año + MM3 solo 2026)
-# - Serie mensual (comparativo por año + valores)
-# - Tabs analíticos: Casos nuevos / Detección de anomalías (Z-score) / Predicción (MA4)
-# - Mapas: coroplético (fijo) + georreferenciado (puntos)
-# NOTA: Ajusta MAP_PATH al .shp correcto dentro de tu proyecto.
+# Dashboard epidemiológico GBG (SENASA)
+# Shiny app para análisis de datos epidemiológicos
 # =========================================================
 
 library(shiny)
@@ -18,50 +11,17 @@ library(readr)
 library(stringi)
 library(sf)
 library(leaflet)
-
-# ===============================
-# Utilidades
-# ===============================
-movavg_k <- function(x, k = 3) {
-  x <- as.numeric(x)
-  if (length(x) < k) return(rep(NA_real_, length(x)))
-  as.numeric(stats::filter(x, rep(1 / k, k), sides = 1))
-}
-
-fmt_miles <- function(x) formatC(x, format = "f", digits = 0, big.mark = ",")
-
-norm_key <- function(x) {
-  x <- stri_trans_general(as.character(x), "Latin-ASCII")
-  x <- toupper(trimws(x))
-  gsub("\\s+", " ", x)
-}
-
-theme_senasa <- function() {
-  theme_minimal(base_family = "sans") +
-    theme(
-      plot.title   = element_blank(),         # QUITA doble título (solo el del box)
-      plot.caption = element_text(hjust = 0, size = 9),
-      legend.position = "bottom",
-      legend.title = element_text(size = 9),
-      legend.text  = element_text(size = 8),
-      axis.title   = element_text(size = 10),
-      axis.text    = element_text(size = 9),
-      plot.margin  = margin(6, 10, 2, 10)
-    )
-}
-
-blank_plot <- function(msg) {
-  ggplot() +
-    annotate("text", x = 0, y = 0, label = msg, size = 5) +
-    theme_void()
-}
-
+library(gbg)  # Load package functions
 
 # ===============================
 # Cargar datos
 # ===============================
-# Si tu app está en una carpeta del proyecto, asegúrate que el CSV esté ahí o pon ruta absoluta.
-CSV_PATH <- "Base_datos_semana_50-25.csv"
+# Path relative to inst/shiny/
+CSV_PATH <- system.file("extdata", "Base_datos_semana_50-25.csv", package = "gbg")
+if (CSV_PATH == "" || !file.exists(CSV_PATH)) {
+  # Fallback to local file if package data not found
+  CSV_PATH <- "../../Base_datos_semana_50-25.csv"
+}
 
 datos <- read_delim(
   CSV_PATH,
@@ -71,11 +31,6 @@ datos <- read_delim(
   guess_max = 200000,
   show_col_types = FALSE
 )
-
-# Normalizar nombres de columnas para trabajar seguro
-names(datos) <- stri_trans_general(names(datos), "Latin-ASCII")
-names(datos) <- gsub("[^A-Za-z0-9 ]", "", names(datos))
-names(datos) <- gsub("\\s+", "_", trimws(names(datos)))
 
 # Columnas esperadas (tras normalización)
 # Semana epidemiológica -> Semana_epidemiologica
@@ -90,27 +45,8 @@ names(datos) <- gsub("\\s+", "_", trimws(names(datos)))
 LAT_COL <- "Latitud"
 LON_COL <- "Longitud"
 
-# Tipos
-if ("Semana_epidemiologica" %in% names(datos)) datos$Semana_epidemiologica <- suppressWarnings(as.integer(datos$Semana_epidemiologica))
-if ("Ano" %in% names(datos)) datos$Ano <- suppressWarnings(as.integer(datos$Ano))
-if ("Mes" %in% names(datos)) datos$Mes <- suppressWarnings(as.integer(datos$Mes))
-
-# Numérico (acepta comas/puntos)
-if ("Animales_muestreados" %in% names(datos)) {
-  datos$Animales_muestreados <- readr::parse_number(
-    as.character(datos$Animales_muestreados),
-    locale = locale(decimal_mark = ",", grouping_mark = ".")
-  )
-}
-
-# Texto a mayúsculas
-for (c in c("Especie", "Region", "Provincia", "Canton", "Distrito", "Casos")) {
-  if (c %in% names(datos)) datos[[c]] <- norm_key(datos[[c]])
-}
-
-datos <- datos %>%
-  filter(!is.na(Ano), !is.na(Semana_epidemiologica)) %>%
-  filter(!is.na(Animales_muestreados), is.finite(Animales_muestreados))
+# Aplicar normalización
+datos <- normalizar_columnas(datos)
 
 anios_disponibles <- sort(unique(datos$Ano))
 
@@ -118,7 +54,11 @@ anios_disponibles <- sort(unique(datos$Ano))
 # Shape cantones
 # ===============================
 # Ajusta este path si tu carpeta es distinta
-MAP_PATH <- "data/Cantones_de_Costa_Rica/Cantones_de_Costa_Rica.shp"
+MAP_PATH <- system.file("extdata", "Cantones_de_Costa_Rica", "Cantones_de_Costa_Rica.shp", package = "gbg")
+if (MAP_PATH == "" || !file.exists(MAP_PATH)) {
+  # Fallback to local path
+  MAP_PATH <- "../../data/Cantones_de_Costa_Rica/Cantones_de_Costa_Rica.shp"
+}
 
 cr_cantones <- NULL
 if (file.exists(MAP_PATH)) {
@@ -249,18 +189,12 @@ server <- function(input, output, session) {
 
   # 1) Base (sin tipo de caso)
   base_df <- eventReactive(input$procesar, {
-    df <- datos
-    if (input$anio != "Todos") df <- df %>% filter(Ano == as.integer(input$anio))
-    if (input$region != "Todas") df <- df %>% filter(Region == input$region)
-    if (input$especie != "Todas") df <- df %>% filter(Especie == input$especie)
-    df
+    aplicar_filtros(datos, anio = input$anio, region = input$region, especie = input$especie)
   }, ignoreInit = FALSE)
 
   # 2) Aplicar tipo de caso
   df_ok <- eventReactive(input$procesar, {
-    df <- base_df()
-    if (input$tipo_caso != "Todos") df <- df %>% filter(Casos == input$tipo_caso)
-    df
+    aplicar_filtros(datos, anio = input$anio, region = input$region, especie = input$especie, tipo_caso = input$tipo_caso)
   }, ignoreInit = FALSE)
 
   # ===============================
@@ -303,22 +237,20 @@ server <- function(input, output, session) {
     df <- df_ok()
     if (nrow(df) == 0) return(ggplot() + theme_void())
 
-    pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
-
     if (input$anio == "Todos") {
       dfp <- df %>%
         group_by(Ano, Semana_epidemiologica) %>%
         summarise(m = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop")
 
-      p <- ggplot(dfp, aes(Semana_epidemiologica, m, color = factor(Ano), group = Ano)) +
-        geom_line() +
-        scale_color_manual(
-          values = c("2023"="blue","2024"="orange","2025"="red","2026"="darkgreen"),
-          drop = FALSE,
-          name = "Año"
-        ) +
-        labs(x = "Semana epidemiológica", y = "Número de Animales Muestreados", caption = pie) +
-        theme_senasa()
+      p <- crear_grafico(
+        dfp, 
+        x_var = "Semana_epidemiologica", 
+        y_var = "m", 
+        tipo = "linea",
+        color_var = "Ano",
+        titulo_x = "Semana epidemiológica", 
+        titulo_y = "Número de Animales Muestreados"
+      )
 
       # MM3 SOLO 2026
       df26 <- dfp %>% filter(Ano == 2026) %>% arrange(Semana_epidemiologica)
@@ -345,7 +277,7 @@ server <- function(input, output, session) {
 
       p <- ggplot(dfp, aes(Semana_epidemiologica, m)) +
         geom_line(color = col) +
-        labs(x = "Semana epidemiológica", y = "Número de Animales Muestreados", caption = pie) +
+        labs(x = "Semana epidemiológica", y = "Número de Animales Muestreados", caption = "Fuente: SENASA – SIVE-PNTrans, 2026") +
         theme_senasa()
 
       if (anio_sel == 2026 && nrow(dfp) >= 3) {
@@ -363,8 +295,6 @@ server <- function(input, output, session) {
     df <- df_ok()
     if (nrow(df) == 0) return(ggplot() + theme_void())
 
-    pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
-
     dfm <- df %>%
       filter(!is.na(Mes)) %>%
       group_by(Ano, Mes) %>%
@@ -372,18 +302,17 @@ server <- function(input, output, session) {
 
     if (nrow(dfm) == 0) return(ggplot() + theme_void())
 
-    ggplot(dfm, aes(Mes, m, color = factor(Ano), group = Ano)) +
-      geom_line() +
-      geom_point() +
-      geom_text(aes(label = fmt_miles(m)), vjust = -0.4, size = 2.5, show.legend = FALSE) +
-      scale_color_manual(
-        values = c("2023"="blue","2024"="orange","2025"="red","2026"="darkgreen"),
-        drop = FALSE,
-        name = "Año"
-      ) +
-      scale_x_continuous(breaks = 1:12) +
-      labs(x = "Mes", y = "Número de Animales Muestreados", caption = pie) +
-      theme_senasa()
+    crear_grafico(
+      dfm,
+      x_var = "Mes",
+      y_var = "m",
+      tipo = "linea",
+      agregar_puntos = TRUE,
+      agregar_etiquetas = TRUE,
+      color_var = "Ano",
+      titulo_x = "Mes",
+      titulo_y = "Número de Animales Muestreados"
+    ) + scale_x_continuous(breaks = 1:12)
   })
 
   # ===============================
@@ -400,20 +329,19 @@ server <- function(input, output, session) {
   })
 
   output$plot_nuevos <- renderPlot({
-    pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
     w <- weekly_new()
     if (is.null(w) || nrow(w) == 0) return(ggplot() + theme_void())
 
-    ggplot(w, aes(Semana_epidemiologica, nuevos, color = factor(Ano), group = Ano)) +
-      geom_line() +
-      geom_point(size = 1.5) +
-      scale_color_manual(
-        values = c("2023"="blue","2024"="orange","2025"="red","2026"="darkgreen"),
-        drop = FALSE,
-        name = "Año"
-      ) +
-      labs(x = "Semana", y = "Casos nuevos (suma)", caption = pie) +
-      theme_senasa()
+    crear_grafico(
+      w,
+      x_var = "Semana_epidemiologica",
+      y_var = "nuevos",
+      tipo = "linea",
+      agregar_puntos = TRUE,
+      color_var = "Ano",
+      titulo_x = "Semana",
+      titulo_y = "Casos nuevos (suma)"
+    )
   })
 
   output$plot_anom <- renderPlot({
@@ -500,10 +428,10 @@ server <- function(input, output, session) {
   output$map_cr <- renderLeaflet({
     if (is.null(cr_cantones)) {
       return(
-        leaflet() %>%
-          addProviderTiles(providers$CartoDB.Positron) %>%
-          setView(lng = -84, lat = 9.9, zoom = 8) %>%
-          addControl(html = "No se pudo leer el shapefile. Ajusta <b>MAP_PATH</b>.", position = "topright")
+        crear_mapa(
+          tipo = "fijo",
+          mensaje_error = "No se pudo leer el shapefile. Ajusta <b>MAP_PATH</b>."
+        )
       )
     }
 
@@ -519,10 +447,9 @@ server <- function(input, output, session) {
     shp <- cr_cantones %>% left_join(resumen, by = "CANTON_KEY")
     pal <- colorNumeric("YlOrRd", domain = shp$valor, na.color = "#f0f0f0")
 
-    leaflet(shp) %>%
-      addProviderTiles(providers$CartoDB.Positron) %>%
-      setView(lng = -84, lat = 9.9, zoom = 8) %>%  # ✅ NO fitBounds aquí
+    crear_mapa(tipo = "fijo") %>%
       addPolygons(
+        data = shp,
         fillColor = ~pal(valor),
         fillOpacity = 0.8,
         color = "#666666",
@@ -551,10 +478,10 @@ server <- function(input, output, session) {
 
     if (!(LAT_COL %in% names(df)) || !(LON_COL %in% names(df))) {
       return(
-        leaflet() %>%
-          addProviderTiles(providers$CartoDB.Positron) %>%
-          setView(lng = -84, lat = 9.9, zoom = 8) %>%
-          addControl(html = "No se encontraron columnas <b>Latitud</b> / <b>Longitud</b>.", position = "topright")
+        crear_mapa(
+          tipo = "fijo",
+          mensaje_error = "No se encontraron columnas <b>Latitud</b> / <b>Longitud</b>."
+        )
       )
     }
 
@@ -585,10 +512,10 @@ server <- function(input, output, session) {
 
     if (nrow(df) == 0) {
       return(
-        leaflet() %>%
-          addProviderTiles(providers$CartoDB.Positron) %>%
-          setView(lng = -84, lat = 9.9, zoom = 8) %>%
-          addControl(html = "No hay puntos válidos con los filtros actuales.", position = "topright")
+        crear_mapa(
+          tipo = "fijo",
+          mensaje_error = "No hay puntos válidos con los filtros actuales."
+        )
       )
     }
 
@@ -605,8 +532,7 @@ server <- function(input, output, session) {
       "<b>Animales muestreados:</b> ", ifelse(is.na(df$Animales_muestreados), "0", fmt_miles(df$Animales_muestreados))
     )
 
-    leaflet(df) %>%
-      addProviderTiles(providers$CartoDB.Positron) %>%
+    crear_mapa(tipo = "base") %>%
       fitBounds(
         lng1 = min(df$lon, na.rm = TRUE),
         lat1 = min(df$lat, na.rm = TRUE),
@@ -614,6 +540,7 @@ server <- function(input, output, session) {
         lat2 = max(df$lat, na.rm = TRUE)
       ) %>%
       addCircleMarkers(
+        data = df,
         lng = ~lon, lat = ~lat,
         radius = 4,
         stroke = TRUE, weight = 0.6, color = "#222222",
