@@ -73,7 +73,7 @@ aplicar_filtros <- function(df, anio = "Todos", region = "Todas", especie = "Tod
 # ===============================
 crear_grafico <- function(df, x_var, y_var, tipo = "linea", agregar_puntos = FALSE, 
                           agregar_etiquetas = FALSE, color_var = NULL, titulo_x = "", 
-                          titulo_y = "", incluir_mm3 = FALSE, anio_sel = NULL) {
+                          titulo_y = "") {
   pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
   
   # Colores por año estandarizados
@@ -106,21 +106,6 @@ crear_grafico <- function(df, x_var, y_var, tipo = "linea", agregar_puntos = FAL
   
   # Etiquetas
   p <- p + labs(x = titulo_x, y = titulo_y, caption = pie) + theme_senasa()
-  
-  # Media móvil 3 para año 2026 si se requiere
-  if (incluir_mm3 && !is.null(anio_sel)) {
-    if (anio_sel == 2026 && nrow(df) >= 3) {
-      df_mm <- df %>% arrange(.data[[x_var]])
-      df_mm$mm3 <- movavg_k(df_mm[[y_var]], 3)
-      p <- p + geom_line(
-        data = df_mm,
-        aes(x = .data[[x_var]], y = mm3),
-        inherit.aes = FALSE,
-        linetype = "dashed",
-        color = "black"
-      )
-    }
-  }
   
   return(p)
 }
@@ -432,14 +417,10 @@ server <- function(input, output, session) {
 
       col <- if (anio_sel == 2023) "blue" else if (anio_sel == 2024) "orange" else if (anio_sel == 2025) "red" else "darkgreen"
 
-      p <- crear_grafico(
-        dfp,
-        x_var = "Semana_epidemiologica",
-        y_var = "m",
-        tipo = "linea",
-        titulo_x = "Semana epidemiológica",
-        titulo_y = "Número de Animales Muestreados"
-      ) + geom_line(color = col)
+      p <- ggplot(dfp, aes(Semana_epidemiologica, m)) +
+        geom_line(color = col) +
+        labs(x = "Semana epidemiológica", y = "Número de Animales Muestreados", caption = "Fuente: SENASA – SIVE-PNTrans, 2026") +
+        theme_senasa()
 
       if (anio_sel == 2026 && nrow(dfp) >= 3) {
         dfp$mm3 <- movavg_k(dfp$m, 3)
