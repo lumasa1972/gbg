@@ -61,7 +61,7 @@ blank_plot <- function(msg) {
 # Cargar datos
 # ===============================
 # Si tu app está en una carpeta del proyecto, asegúrate que el CSV esté ahí o pon ruta absoluta.
-CSV_PATH <- "Base datos semana 50-25.csv"
+CSV_PATH <- "Base_datos_semana_50-25.csv"
 
 datos <- read_delim(
   CSV_PATH,
