@@ -1,2 +1,11 @@
 ^gbg\.Rproj$
 ^\.Rproj\.user$
+^\.github$
+^Base_datos_semana_50-25\.csv$
+^data/.*\.shp$
+^data/.*\.dbf$
+^data/.*\.shx$
+^data/.*\.prj$
+^data/.*\.cpg$
+^app\.R$
+^README\.Rmd$

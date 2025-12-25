@@ -1,1 +1,42 @@
-.Rproj.user
+# R history and data
+.RData
+.Rhistory
+.Rapp.history
+
+# Session Data files
+.RData
+
+# User-specific files
+.Ruserdata
+
+# RStudio files
+.Rproj.user/
+*.Rproj
+
+# produced vignettes
+vignettes/*.html
+vignettes/*.pdf
+
+# OAuth2 token
+.httr-oauth
+
+# knitr and R markdown default cache directories
+*_cache/
+/cache/
+
+# Temporary files
+*.utf8.md
+*.knit.md
+
+# R check
+*.Rcheck/
+
+# pkgdown site
+docs/
+
+# translation temp files
+po/*~
+
+# Large data files (keep original in repo but exclude if too large)
+# Uncomment if file is > 100MB
+# Base_datos_semana_50-25.csv
