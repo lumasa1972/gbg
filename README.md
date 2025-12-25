@@ -14,9 +14,25 @@ devtools::install_github("lumasa1972/gbg")
 
 ### Ejecutar el dashboard
 
+**Opción 1: Desde el paquete instalado (recomendado)**
 ```r
 library(gbg)
 run_dashboard()
+```
+
+**Opción 2: Modo desarrollo (sin instalar)**
+```r
+# Desde el directorio raíz del proyecto
+source("run_app.R")
+
+# O directamente
+shiny::runApp("inst/shiny")
+```
+
+**Opción 3: Desarrollo con devtools**
+```r
+devtools::load_all()  # Carga el paquete
+run_dashboard()       # Ejecuta el dashboard
 ```
 
 ### Usar las funciones de análisis
@@ -69,10 +85,31 @@ gbg/
 
 ## Desarrollo
 
+### Configuración inicial
 ```r
 # Instalar dependencias de desarrollo
 install.packages(c("devtools", "roxygen2", "testthat"))
 
+# Clonar el repositorio
+git clone https://github.com/lumasa1972/gbg.git
+cd gbg
+```
+
+### Ejecutar en modo desarrollo
+```r
+# Opción 1: Usar el launcher
+source("run_app.R")
+
+# Opción 2: Cargar y ejecutar
+devtools::load_all()
+run_dashboard()
+
+# Opción 3: Ejecutar directamente
+shiny::runApp("inst/shiny")
+```
+
+### Flujo de trabajo
+```r
 # Documentar funciones
 devtools::document()
 
@@ -82,6 +119,16 @@ devtools::test()
 # Verificar el paquete
 devtools::check()
 ```
+
+## Solución de problemas
+
+### Error: "Loading R/ subdirectory for Shiny application"
+Este error ocurre si intentas ejecutar `shiny::runApp()` desde el directorio raíz del proyecto. 
+
+**Solución:**
+- Usa `run_dashboard()` después de cargar el paquete con `library(gbg)` o `devtools::load_all()`
+- O ejecuta `shiny::runApp("inst/shiny")` especificando la ruta correcta
+- O usa el script launcher: `source("run_app.R")`
 
 ## Licencia
 

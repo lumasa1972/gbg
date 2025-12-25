@@ -8,4 +8,5 @@
 ^data/.*\.prj$
 ^data/.*\.cpg$
 ^app\.R$
+^run_app\.R$
 ^README\.Rmd$
