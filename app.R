@@ -1,704 +1,396 @@
-## =========================================================
-# app_gbg_dashboard_full.R
-# Dashboard epidemiológico GBG (SENASA) – versión "todo":
-# - Filtros + botón Procesar (eventReactive)
-# - KPI (acumulados, nuevos, cantones con casos, registros)
-# - Serie semanal (comparativo por año + MM3 solo 2026)
-# - Serie mensual (comparativo por año + valores)
-# - Tabs analíticos: Casos nuevos / Detección de anomalías (Z-score) / Predicción (MA4)
-# - Mapas: coroplético (fijo) + georreferenciado (puntos)
-# NOTA: Ajusta MAP_PATH al .shp correcto dentro de tu proyecto.
-# =========================================================
+# ==============================
+# APP SHINY – DASHBOARD COMPLETO (VIGILANCIA EPIDEMIOLÓGICA)
+# - Indicador principal recomendado: "Animales muestreados"
+# - CSV ; o , (auto-detección) + Excel
+# - Diagnóstico + Vista previa
+# - Selectores dinámicos
+# - Mapa con auto-corrección de coordenadas + clusters
+# ==============================
 
 library(shiny)
-library(shinydashboard)
+library(bslib)
 library(dplyr)
 library(ggplot2)
 library(readr)
-library(stringi)
-library(sf)
 library(leaflet)
 
-# ===============================
-# Utilidades
-# ===============================
-movavg_k <- function(x, k = 3) {
-  x <- as.numeric(x)
-  if (length(x) < k) return(rep(NA_real_, length(x)))
-  as.numeric(stats::filter(x, rep(1 / k, k), sides = 1))
-}
+`%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
-fmt_miles <- function(x) formatC(x, format = "f", digits = 0, big.mark = ",")
-
-norm_key <- function(x) {
-  x <- stri_trans_general(as.character(x), "Latin-ASCII")
-  x <- toupper(trimws(x))
-  gsub("\\s+", " ", x)
-}
-
-theme_senasa <- function() {
-  theme_minimal(base_family = "sans") +
-    theme(
-      plot.title   = element_blank(),         # QUITA doble título (solo el del box)
-      plot.caption = element_text(hjust = 0, size = 9),
-      legend.position = "bottom",
-      legend.title = element_text(size = 9),
-      legend.text  = element_text(size = 8),
-      axis.title   = element_text(size = 10),
-      axis.text    = element_text(size = 9),
-      plot.margin  = margin(6, 10, 2, 10)
-    )
-}
-
-blank_plot <- function(msg) {
-  ggplot() +
-    annotate("text", x = 0, y = 0, label = msg, size = 5) +
-    theme_void()
-}
-
-
-# ===============================
-# Filtros dinámicos
-# ===============================
-aplicar_filtros <- function(df, anio = "Todos", region = "Todas", especie = "Todas", tipo_caso = "Todos") {
-  if (anio != "Todos") df <- df %>% filter(Ano == as.integer(anio))
-  if (region != "Todas") df <- df %>% filter(Region == region)
-  if (especie != "Todas") df <- df %>% filter(Especie == especie)
-  if (tipo_caso != "Todos") df <- df %>% filter(Casos == tipo_caso)
-  return(df)
-}
-
-# ===============================
-# Configuración de gráficos
-# ===============================
-crear_grafico <- function(df, x_var, y_var, tipo = "linea", agregar_puntos = FALSE, 
-                          agregar_etiquetas = FALSE, color_var = NULL, titulo_x = "", 
-                          titulo_y = "") {
-  pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
+# ------------------------------
+# Lectura robusta
+# ------------------------------
+leer_datos <- function(path, filename = NULL) {
+  ext <- tolower(tools::file_ext(filename %||% path))
   
-  # Colores por año estandarizados
-  colores_anio <- c("2023" = "blue", "2024" = "orange", "2025" = "red", "2026" = "darkgreen")
-  
-  p <- ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]]))
-  
-  # Aplicar color si se especifica
-  if (!is.null(color_var)) {
-    p <- p + aes(color = factor(.data[[color_var]]), group = .data[[color_var]])
+  if (ext == "csv") {
+    first_line <- readLines(path, n = 1, warn = FALSE, encoding = "UTF-8")
+    delim <- if (grepl(";", first_line)) ";" else ","
+    loc <- if (delim == ";") locale(encoding = "UTF-8", decimal_mark = ",") else locale(encoding = "UTF-8")
+    
+    return(read_delim(
+      file = path,
+      delim = delim,
+      locale = loc,
+      trim_ws = TRUE,
+      guess_max = 200000,
+      show_col_types = FALSE
+    ))
   }
   
-  # Tipo de gráfico
-  if (tipo == "linea") {
-    p <- p + geom_line()
+  if (ext %in% c("xls", "xlsx")) {
+    if (!requireNamespace("readxl", quietly = TRUE)) {
+      stop("Falta el paquete 'readxl'. Instálalo con install.packages('readxl')")
+    }
+    return(readxl::read_excel(path))
   }
   
-  if (agregar_puntos) {
-    p <- p + geom_point()
-  }
-  
-  if (agregar_etiquetas) {
-    p <- p + geom_text(aes(label = fmt_miles(.data[[y_var]])), vjust = -0.4, size = 2.5, show.legend = FALSE)
-  }
-  
-  # Escala de colores
-  if (!is.null(color_var)) {
-    p <- p + scale_color_manual(values = colores_anio, drop = FALSE, name = "Año")
-  }
-  
-  # Etiquetas
-  p <- p + labs(x = titulo_x, y = titulo_y, caption = pie) + theme_senasa()
-  
-  return(p)
+  stop("Formato no soportado. Use CSV o Excel.")
 }
 
-# ===============================
-# Configuración de mapas
-# ===============================
-crear_mapa <- function(tipo = "base", lng = -84, lat = 9.9, zoom = 8, mensaje_error = NULL) {
-  m <- leaflet() %>% addProviderTiles(providers$CartoDB.Positron)
-  
-  if (tipo == "fijo") {
-    # Mapa con vista fija (no fitBounds)
-    m <- m %>% setView(lng = lng, lat = lat, zoom = zoom)
-  }
-  
-  if (!is.null(mensaje_error)) {
-    m <- m %>% addControl(html = mensaje_error, position = "topright")
-  }
-  
-  return(m)
+# ------------------------------
+# Normalización + auto-guess
+# ------------------------------
+norm <- function(x) {
+  x <- tolower(x)
+  x <- gsub("á","a", x); x <- gsub("é","e", x); x <- gsub("í","i", x)
+  x <- gsub("ó","o", x); x <- gsub("ú","u", x); x <- gsub("ñ","n", x)
+  x <- gsub("\\s+", " ", x)
+  trimws(x)
 }
 
-# ===============================
-# Normalización de datos
-# ===============================
-normalizar_columnas <- function(df) {
-  # Normalizar nombres de columnas para trabajar seguro
-  names(df) <- stri_trans_general(names(df), "Latin-ASCII")
-  names(df) <- gsub("[^A-Za-z0-9 ]", "", names(df))
-  names(df) <- gsub("\\s+", "_", trimws(names(df)))
-  
-  # Tipos
-  if ("Semana_epidemiologica" %in% names(df)) df$Semana_epidemiologica <- suppressWarnings(as.integer(df$Semana_epidemiologica))
-  if ("Ano" %in% names(df)) df$Ano <- suppressWarnings(as.integer(df$Ano))
-  if ("Mes" %in% names(df)) df$Mes <- suppressWarnings(as.integer(df$Mes))
-  
-  # Numérico (acepta comas/puntos)
-  if ("Animales_muestreados" %in% names(df)) {
-    df$Animales_muestreados <- readr::parse_number(
-      as.character(df$Animales_muestreados),
-      locale = locale(decimal_mark = ",", grouping_mark = ".")
-    )
+guess_col <- function(cols, patterns, fallback = cols[1]) {
+  nc <- norm(cols)
+  for (p in patterns) {
+    idx <- which(grepl(p, nc, perl = TRUE))
+    if (length(idx) > 0) return(cols[idx[1]])
   }
-  
-  # Texto a mayúsculas
-  for (c in c("Especie", "Region", "Provincia", "Canton", "Distrito", "Casos")) {
-    if (c %in% names(df)) df[[c]] <- norm_key(df[[c]])
-  }
-  
-  # Filtrar datos inválidos
-  df <- df %>%
-    filter(!is.na(Ano), !is.na(Semana_epidemiologica)) %>%
-    filter(!is.na(Animales_muestreados), is.finite(Animales_muestreados))
-  
-  return(df)
+  fallback
 }
 
-# ===============================
-# Cargar datos
-# ===============================
-# Si tu app está en una carpeta del proyecto, asegúrate que el CSV esté ahí o pon ruta absoluta.
-CSV_PATH <- "Base_datos_semana_50-25.csv"
-
-datos <- read_delim(
-  CSV_PATH,
-  delim = ";",
-  locale = locale(encoding = "UTF-8", decimal_mark = ","),
-  trim_ws = TRUE,
-  guess_max = 200000,
-  show_col_types = FALSE
-)
-
-# Columnas esperadas (tras normalización)
-# Semana epidemiológica -> Semana_epidemiologica
-# Año -> Ano
-# Animales muestreados -> Animales_muestreados
-# Región -> Region
-# Cantón -> Canton
-# Longitud / Latitud -> Longitud / Latitud
-# Casos -> Casos
-
-# Coordenadas exactas del CSV
-LAT_COL <- "Latitud"
-LON_COL <- "Longitud"
-
-# Aplicar normalización
-datos <- normalizar_columnas(datos)
-
-anios_disponibles <- sort(unique(datos$Ano))
-
-# ===============================
-# Shape cantones
-# ===============================
-# Ajusta este path si tu carpeta es distinta
-MAP_PATH <- "data/Cantones_de_Costa_Rica/Cantones_de_Costa_Rica.shp"
-
-cr_cantones <- NULL
-if (file.exists(MAP_PATH)) {
-  cr_cantones <- tryCatch(
-    {
-      shp <- st_read(MAP_PATH, quiet = TRUE)
-      # Intenta adivinar nombre del cantón del shp
-      cand <- intersect(names(shp), c("NOM_CANT_1", "NOMBRE_CANTON", "CANTON", "CANTON_NOM"))
-      if (length(cand) == 0) cand <- names(shp)[1]
-      shp$CANTON_KEY <- norm_key(shp[[cand[1]]])
-      st_transform(shp, 4326)
-    },
-    error = function(e) NULL
-  )
+# ------------------------------
+# Limpieza robusta a número
+# (sirve para "1.234,56", "1,234.56", "  123  ", etc.)
+# ------------------------------
+to_num_robusto <- function(x) {
+  x <- as.character(x)
+  x <- trimws(x)
+  
+  # intento 1: estilo CR (1.234,56)
+  x1 <- gsub("\\.", "", x)
+  x1 <- gsub(",", ".", x1)
+  x1 <- gsub("[^0-9\\.-]", "", x1)
+  n1 <- suppressWarnings(as.numeric(x1))
+  
+  # intento 2: estilo US (1,234.56)
+  x2 <- gsub(",", "", x)
+  x2 <- gsub("[^0-9\\.-]", "", x2)
+  n2 <- suppressWarnings(as.numeric(x2))
+  
+  if (sum(!is.na(n1)) >= sum(!is.na(n2))) n1 else n2
 }
 
-# ===============================
+# ------------------------------
 # UI
-# ===============================
-ui <- dashboardPage(
-  dashboardHeader(title = "Análisis epidemiológico – GBG"),
-  dashboardSidebar(
-    sidebarMenu(
-      menuItem("Resumen", tabName = "resumen", icon = icon("chart-line")),
-      hr(),
-      selectInput("anio", "Año", choices = c("Todos", anios_disponibles), selected = "Todos"),
-      selectInput("region", "Región", choices = c("Todas", sort(unique(datos$Region))), selected = "Todas"),
-      selectInput("especie", "Especie", choices = c("Todas", sort(unique(datos$Especie))), selected = "Todas"),
-      selectInput("tipo_caso", "Casos", choices = c("Todos", "NUEVOS", "ACUMULADOS"), selected = "Todos"),
-      actionButton("procesar", "Procesar", icon = icon("play"))
-    )
+# ------------------------------
+ui <- page_sidebar(
+  title = "Dashboard Shiny – Vigilancia Epidemiológica",
+  
+  sidebar = sidebar(
+    fileInput("archivo", "Cargar base (CSV o Excel)", accept = c(".csv",".xls",".xlsx")),
+    helpText("Tip: Si el CSV viene con ';' (Excel CR), la app lo detecta automáticamente."),
+    hr(),
+    
+    uiOutput("ui_cols"),
+    hr(),
+    uiOutput("ui_filtros"),
+    hr(),
+    
+    downloadButton("descargar", "Descargar datos filtrados")
   ),
-  dashboardBody(
-    tags$head(
-      tags$style(HTML("
-        /* Sidebar 25% más angosta aprox */
-        .main-sidebar { width:150px; }
-        .content-wrapper, .main-footer { margin-left:150px; }
-        .main-header .logo { width:150px; }
-        .main-header .navbar { margin-left:150px; }
-
-        /* Leyendas Leaflet compactas */
-        .leaflet-control.leaflet-legend {
-          max-width:160px !important;
-          padding:6px 8px !important;
-          font-size:11px !important;
-        }
-
-        /* Boxes: títulos un poco más pequeños */
-        .box .box-header .box-title { font-size: 16px; }
-      "))
+  
+  layout_column_wrap(
+    width = 1,
+    
+    card(
+      card_header("Diagnóstico + Vista previa"),
+      verbatimTextOutput("diag"),
+      uiOutput("aviso_valor"),
+      tableOutput("preview")
     ),
     
-    tabItems(
-      tabItem(
-        tabName = "resumen",
-        
-        # KPI
-        fluidRow(
-          valueBoxOutput("kpi_registros", width = 3),
-          valueBoxOutput("kpi_muestreados", width = 3),
-          valueBoxOutput("kpi_nuevos", width = 3),
-          valueBoxOutput("kpi_cantones", width = 3)
-        ),
-        
-        # Tabs analíticos (como la imagen)
-        fluidRow(
-          box(
-            title = "Tendencia temporal de casos nuevos",
-            width = 12, status = "primary", solidHeader = TRUE,
-            tabBox(
-              width = 12,
-              tabPanel("Casos nuevos", plotOutput("plot_nuevos", height = 280)),
-              tabPanel("Detección de anomalías", plotOutput("plot_anom", height = 280)),
-              tabPanel("Predicción de tendencia", plotOutput("plot_pred", height = 280))
-            )
-          )
-        ),
-        
-        # Comparativos semana / mes (mismo tamaño)
-        fluidRow(
-          column(
-            width = 6,
-            box(
-              title = "Comparativo semanal de animales muestreados por año",
-              width = 12, status = "primary", solidHeader = TRUE,
-              plotOutput("plot_semana", height = 260)
-            )
-          ),
-          column(
-            width = 6,
-            box(
-              title = "Comparativo mensual de animales muestreados por año",
-              width = 12, status = "primary", solidHeader = TRUE,
-              plotOutput("plot_mes", height = 260)
-            )
-          )
-        ),
-        
-        # Mapas lado a lado
-        fluidRow(
-          column(
-            width = 6,
-            box(
-              title = "Mapa coroplético – Casos por cantón",
-              width = 12, status = "primary", solidHeader = TRUE,
-              leafletOutput("map_cr", height = 460)
-            )
-          ),
-          column(
-            width = 6,
-            box(
-              title = "Mapa georreferenciado – Puntos (casos)",
-              width = 12, status = "primary", solidHeader = TRUE,
-              leafletOutput("map_pts", height = 460)
-            )
-          )
-        )
-      )
+    layout_column_wrap(
+      width = 1/2,
+      card(card_header("Resumen"), uiOutput("resumen")),
+      card(card_header("Total por año"), plotOutput("plot_anio"))
+    ),
+    
+    layout_column_wrap(
+      width = 1/2,
+      card(card_header("Serie semanal"), plotOutput("plot_semana")),
+      card(card_header("Mapa (clusters)"), leafletOutput("mapa", height = 350))
     )
   )
 )
 
-# ===============================
+# ------------------------------
 # SERVER
-# ===============================
+# ------------------------------
 server <- function(input, output, session) {
   
-  # 1) Base (sin tipo de caso)
-  base_df <- eventReactive(input$procesar, {
-    aplicar_filtros(datos, anio = input$anio, region = input$region, especie = input$especie)
-  }, ignoreInit = FALSE)
-  
-  # 2) Aplicar tipo de caso
-  df_ok <- eventReactive(input$procesar, {
-    aplicar_filtros(datos, anio = input$anio, region = input$region, especie = input$especie, tipo_caso = input$tipo_caso)
-  }, ignoreInit = FALSE)
-  
-  # ===============================
-  # KPI
-  # ===============================
-  output$kpi_registros <- renderValueBox({
-    df <- df_ok()
-    valueBox(value = fmt_miles(nrow(df)), subtitle = "Registros", icon = icon("database"), color = "aqua")
+  # ---- Datos crudos ----
+  datos_raw <- reactive({
+    req(input$archivo)
+    leer_datos(input$archivo$datapath, input$archivo$name)
   })
   
-  output$kpi_muestreados <- renderValueBox({
-    df <- df_ok()
-    tot <- sum(df$Animales_muestreados, na.rm = TRUE)
-    valueBox(value = fmt_miles(tot), subtitle = "Animales muestreados", icon = icon("vial"), color = "green")
+  columnas <- reactive({
+    req(datos_raw())
+    names(datos_raw())
   })
   
-  output$kpi_nuevos <- renderValueBox({
-    df <- base_df()
-    df_n <- df %>% filter(Casos == "NUEVOS")
-    tot <- sum(df_n$Animales_muestreados, na.rm = TRUE)
-    valueBox(value = fmt_miles(tot), subtitle = "Casos NUEVOS", icon = icon("circle-plus"), color = "yellow")
-  })
-  
-  output$kpi_cantones <- renderValueBox({
-    df <- base_df()
-    if (!"Canton" %in% names(df)) {
-      valueBox(value = "ND", subtitle = "Cantones con casos", icon = icon("map"), color = "purple")
-    } else {
-      cant <- df %>% filter(!is.na(Canton), Canton != "") %>% distinct(Canton) %>% nrow()
-      total_cant <- if (!is.null(cr_cantones)) nrow(cr_cantones) else NA_integer_
-      pct <- if (!is.na(total_cant) && total_cant > 0) paste0(" (", round(100 * cant / total_cant, 1), "%)") else ""
-      valueBox(value = paste0(fmt_miles(cant), pct), subtitle = "Cantones con casos", icon = icon("map"), color = "purple")
-    }
-  })
-  
-  # ===============================
-  # Comparativo SEMANAL (sin puntos / sin etiquetas)
-  # ===============================
-  output$plot_semana <- renderPlot({
-    df <- df_ok()
-    if (nrow(df) == 0) return(ggplot() + theme_void())
+  # ---- Selectores dinámicos (por defecto: Animales muestreados) ----
+  output$ui_cols <- renderUI({
+    req(columnas())
+    cols <- columnas()
     
-    if (input$anio == "Todos") {
-      dfp <- df %>%
-        group_by(Ano, Semana_epidemiologica) %>%
-        summarise(m = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop")
-      
-      p <- crear_grafico(
-        dfp, 
-        x_var = "Semana_epidemiologica", 
-        y_var = "m", 
-        tipo = "linea",
-        color_var = "Ano",
-        titulo_x = "Semana epidemiológica", 
-        titulo_y = "Número de Animales Muestreados"
+    default_anio <- guess_col(cols, c("^ano$", "^año$", "year$"), fallback = cols[1])
+    default_sem  <- guess_col(cols, c("semana epidemiologica", "^semana$|^semana "), fallback = cols[min(2, length(cols))])
+    
+    # Preferir Animales muestreados como indicador principal
+    default_val <- if ("Animales muestreados" %in% cols) {
+      "Animales muestreados"
+    } else {
+      guess_col(cols, c("animales muestreados", "muestras", "total"), fallback = cols[min(3, length(cols))])
+    }
+    
+    lat_exists <- any(grepl("^latitud$|^lat$|latitud", norm(cols)))
+    lon_exists <- any(grepl("^longitud$|^lon$|longitud", norm(cols)))
+    default_lat <- if (lat_exists) guess_col(cols, c("^latitud$|^lat$|latitud"), fallback = "") else ""
+    default_lon <- if (lon_exists) guess_col(cols, c("^longitud$|^lon$|longitud"), fallback = "") else ""
+    
+    tagList(
+      selectInput("col_anio", "Columna Año", choices = cols, selected = default_anio),
+      selectInput("col_semana", "Columna Semana", choices = cols, selected = default_sem),
+      selectInput("col_valor", "Indicador (recomendado: Animales muestreados)", choices = cols, selected = default_val),
+      selectInput("col_lat", "Latitud (opcional)", choices = c("Ninguna" = "", cols), selected = default_lat),
+      selectInput("col_lon", "Longitud (opcional)", choices = c("Ninguna" = "", cols), selected = default_lon)
+    )
+  })
+  
+  # ---- Diagnóstico ----
+  output$diag <- renderPrint({
+    req(datos_raw())
+    df <- datos_raw()
+    cat("Filas:", nrow(df), "\n")
+    cat("Columnas:", ncol(df), "\n\n")
+    cat("Primeros nombres de columnas:\n")
+    print(head(names(df), 25))
+    cat("\nSelección actual:\n")
+    cat("Año   :", input$col_anio, "\n")
+    cat("Semana:", input$col_semana, "\n")
+    cat("Valor :", input$col_valor, "\n")
+    cat("Lat   :", input$col_lat, "\n")
+    cat("Lon   :", input$col_lon, "\n")
+  })
+  
+  # ---- Vista previa SIEMPRE ----
+  output$preview <- renderTable({
+    req(datos_raw())
+    head(datos_raw(), 10)
+  })
+  
+  # ---- Datos estandarizados + validación suave del valor ----
+  datos_std <- reactive({
+    req(datos_raw(), input$col_anio, input$col_semana, input$col_valor)
+    df <- datos_raw()
+    
+    validate(
+      need(input$col_anio %in% names(df), "Selecciona una columna válida de Año."),
+      need(input$col_semana %in% names(df), "Selecciona una columna válida de Semana."),
+      need(input$col_valor %in% names(df), "Selecciona una columna válida de Indicador.")
+    )
+    
+    df <- df %>%
+      mutate(
+        anio   = suppressWarnings(as.integer(.data[[input$col_anio]])),
+        semana = suppressWarnings(as.integer(.data[[input$col_semana]])),
+        valor  = to_num_robusto(.data[[input$col_valor]])
       )
-      
-      # MM3 SOLO 2026
-      df26 <- dfp %>% filter(Ano == 2026) %>% arrange(Semana_epidemiologica)
-      if (nrow(df26) >= 3) {
-        df26$mm3 <- movavg_k(df26$m, 3)
-        p <- p + geom_line(
-          data = df26,
-          aes(Semana_epidemiologica, mm3),
-          inherit.aes = FALSE,
-          linetype = "dashed",
-          color = "black"
-        )
-      }
-      p
-    } else {
-      anio_sel <- as.integer(input$anio)
-      dfp <- df %>%
-        filter(Ano == anio_sel) %>%
-        group_by(Semana_epidemiologica) %>%
-        summarise(m = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop") %>%
-        arrange(Semana_epidemiologica)
-      
-      col <- if (anio_sel == 2023) "blue" else if (anio_sel == 2024) "orange" else if (anio_sel == 2025) "red" else "darkgreen"
-      
-      p <- ggplot(dfp, aes(Semana_epidemiologica, m)) +
-        geom_line(color = col) +
-        labs(x = "Semana epidemiológica", y = "Número de Animales Muestreados", caption = "Fuente: SENASA – SIVE-PNTrans, 2026") +
-        theme_senasa()
-      
-      if (anio_sel == 2026 && nrow(dfp) >= 3) {
-        dfp$mm3 <- movavg_k(dfp$m, 3)
-        p <- p + geom_line(aes(y = mm3), linetype = "dashed", color = "black")
-      }
-      p
-    }
+    
+    # validación suave: NO rompe la app, solo marca si no es numérico
+    attr(df, "valor_ok") <- !all(is.na(df$valor))
+    
+    df
   })
   
-  # ===============================
-  # Comparativo MENSUAL (con valores)
-  # ===============================
-  output$plot_mes <- renderPlot({
-    df <- df_ok()
-    if (nrow(df) == 0) return(ggplot() + theme_void())
+  # ---- Aviso si el indicador no es numérico ----
+  output$aviso_valor <- renderUI({
+    req(datos_std())
+    ok <- isTRUE(attr(datos_std(), "valor_ok"))
+    if (ok) return(NULL)
     
-    dfm <- df %>%
-      filter(!is.na(Mes)) %>%
-      group_by(Ano, Mes) %>%
-      summarise(m = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop")
-    
-    if (nrow(dfm) == 0) return(ggplot() + theme_void())
-    
-    crear_grafico(
-      dfm,
-      x_var = "Mes",
-      y_var = "m",
-      tipo = "linea",
-      agregar_puntos = TRUE,
-      agregar_etiquetas = TRUE,
-      color_var = "Ano",
-      titulo_x = "Mes",
-      titulo_y = "Número de Animales Muestreados"
-    ) + scale_x_continuous(breaks = 1:12)
+    div(
+      class = "alert alert-warning",
+      "⚠️ El indicador seleccionado no se pudo convertir a número. ",
+      "Elige una columna numérica (recomendado: 'Animales muestreados')."
+    )
   })
   
-  # ===============================
-  # Tabs analíticos (NUEVOS / ANOMALÍAS / PREDICCIÓN)
-  # ===============================
-  weekly_new <- reactive({
-    df <- base_df() %>% filter(Casos == "NUEVOS")
-    if (nrow(df) == 0) return(NULL)
+  # ---- UI filtros (solo si valor es numérico) ----
+  output$ui_filtros <- renderUI({
+    req(datos_std())
+    if (!isTRUE(attr(datos_std(), "valor_ok"))) return(NULL)
+    
+    df <- datos_std()
+    years <- sort(unique(df$anio))
+    wmin <- min(df$semana, na.rm = TRUE)
+    wmax <- max(df$semana, na.rm = TRUE)
+    
+    tagList(
+      selectizeInput(
+        "anio_sel", "Año",
+        choices = years, selected = years,
+        multiple = TRUE,
+        options = list(plugins = list("remove_button"))
+      ),
+      sliderInput(
+        "semana_sel", "Rango de semanas",
+        min = wmin, max = wmax,
+        value = c(wmin, wmax),
+        step = 1
+      )
+    )
+  })
+  
+  # ---- Filtrado (solo si valor es numérico) ----
+  datos_filtrados <- reactive({
+    req(datos_std())
+    df <- datos_std()
+    if (!isTRUE(attr(df, "valor_ok"))) return(NULL)
+    
+    if (is.null(input$anio_sel) || is.null(input$semana_sel)) return(df)
     
     df %>%
-      group_by(Ano, Semana_epidemiologica) %>%
-      summarise(nuevos = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop") %>%
-      arrange(Ano, Semana_epidemiologica)
+      filter(anio %in% as.integer(input$anio_sel)) %>%
+      filter(semana >= input$semana_sel[1], semana <= input$semana_sel[2])
   })
   
-  output$plot_nuevos <- renderPlot({
-    w <- weekly_new()
-    if (is.null(w) || nrow(w) == 0) return(ggplot() + theme_void())
+  # ---- Resumen ----
+  output$resumen <- renderUI({
+    df <- datos_filtrados()
+    if (is.null(df)) return(NULL)
     
-    crear_grafico(
-      w,
-      x_var = "Semana_epidemiologica",
-      y_var = "nuevos",
-      tipo = "linea",
-      agregar_puntos = TRUE,
-      color_var = "Ano",
-      titulo_x = "Semana",
-      titulo_y = "Casos nuevos (suma)"
+    tagList(
+      p(strong("Registros:"), nrow(df)),
+      p(strong("Total:"), format(sum(df$valor, na.rm = TRUE), big.mark = ",", scientific = FALSE))
     )
   })
   
-  output$plot_anom <- renderPlot({
-    pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
+  # ---- Total por año ----
+  output$plot_anio <- renderPlot({
+    df <- datos_filtrados()
+    if (is.null(df)) return(NULL)
     
-    # Usar TODOS los registros filtrados (no solo NUEVOS)
-    df <- df_ok()
-    if (nrow(df) == 0) return(blank_plot("No hay datos para calcular anomalías con los filtros actuales."))
-    
-    # Elegir el año a analizar:
-    # - Si "Todos": usar el año más reciente disponible en el set filtrado
-    # - Si un año específico: usar ese
-    y_sel <- if (input$anio == "Todos") max(df$Ano, na.rm = TRUE) else as.integer(input$anio)
-    
-    ww <- df %>%
-      filter(Ano == y_sel) %>%
-      group_by(Semana_epidemiologica) %>%
-      summarise(valor = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop") %>%
-      arrange(Semana_epidemiologica)
-    
-    if (nrow(ww) < 5) {
-      return(blank_plot(paste0("No hay suficientes observaciones semanales para el año ", y_sel, ".")))
-    }
-    
-    # Z-score semanal:
-    # z_t = (x_t - mu_t) / sigma_t
-    # donde mu_t y sigma_t se calculan con el histórico acumulado (semanas 1..t)
-    ww$mu_t <- sapply(seq_len(nrow(ww)), function(i) mean(ww$valor[1:i], na.rm = TRUE))
-    ww$sig_t <- sapply(seq_len(nrow(ww)), function(i) stats::sd(ww$valor[1:i], na.rm = TRUE))
-    ww$z <- (ww$valor - ww$mu_t) / ww$sig_t
-    
-    # Se considera anomalía cuando |Z| > 2
-    ww$anom <- !is.na(ww$z) & is.finite(ww$z) & abs(ww$z) > 2
-    
-    ggplot(ww, aes(Semana_epidemiologica, valor)) +
-      geom_ribbon(
-        aes(ymin = mu_t - 2 * sig_t, ymax = mu_t + 2 * sig_t),
-        inherit.aes = FALSE,
-        fill = "grey70",
-        alpha = 0.35
-      ) +
-      geom_line(color = "blue", linewidth = 1) +
-      geom_point(color = "blue", size = 1.6) +
-      geom_line(aes(y = mu_t), linetype = "dashed", color = "black", linewidth = 0.8) +
-      geom_point(
-        data = ww %>% filter(anom),
-        aes(Semana_epidemiologica, valor),
-        inherit.aes = FALSE,
-        color = "red",
-        size = 2.5
-      ) +
-      labs(
-        x = "Semana",
-        y = "Número de Animales Muestreados",
-        caption = pie
-      ) +
-      theme_senasa()
+    df %>%
+      group_by(anio) %>%
+      summarise(total = sum(valor, na.rm = TRUE), .groups = "drop") %>%
+      ggplot(aes(x = factor(anio), y = total)) +
+      geom_col() +
+      labs(x = "Año", y = paste0("Total (", input$col_valor, ")")) +
+      theme_minimal()
   })
   
-  
-  output$plot_pred <- renderPlot({
-    pie <- "Fuente: SENASA – SIVE-PNTrans, 2026"
-    w <- weekly_new()
-    if (is.null(w) || nrow(w) < 8) return(ggplot() + theme_void())
+  # ---- Serie semanal ----
+  output$plot_semana <- renderPlot({
+    df <- datos_filtrados()
+    if (is.null(df)) return(NULL)
     
-    y_sel <- if (input$anio == "Todos") max(w$Ano, na.rm = TRUE) else as.integer(input$anio)
-    ww <- w %>% filter(Ano == y_sel) %>% arrange(Semana_epidemiologica)
-    if (nrow(ww) < 8) return(ggplot() + theme_void())
-    
-    # Predicción simple: media móvil 4 semanas (solo como tendencia)
-    ww$ma4 <- movavg_k(ww$nuevos, 4)
-    
-    ggplot(ww, aes(Semana_epidemiologica, nuevos)) +
-      geom_line(color = "#2C3E50") +
-      geom_point(size = 1.5, color = "#2C3E50") +
-      geom_line(aes(y = ma4), linetype = "dashed", color = "darkgreen") +
-      labs(x = "Semana", y = "Casos nuevos", caption = pie) +
-      theme_senasa()
+    df %>%
+      group_by(anio, semana) %>%
+      summarise(total = sum(valor, na.rm = TRUE), .groups = "drop") %>%
+      ggplot(aes(x = semana, y = total)) +
+      geom_line() +
+      geom_point() +
+      facet_wrap(~ anio, scales = "free_y") +
+      labs(x = "Semana epidemiológica", y = paste0("Total (", input$col_valor, ")")) +
+      theme_minimal()
   })
   
-  # ===============================
-  # MAPA COROPLÉTICO (FIJO con setView)
-  # ===============================
-  output$map_cr <- renderLeaflet({
-    if (is.null(cr_cantones)) {
-      return(
-        crear_mapa(
-          tipo = "fijo",
-          mensaje_error = "No se pudo leer el shapefile. Ajusta <b>MAP_PATH</b>."
-        )
-      )
+  # ---- Mapa (auto-corrección coordenadas + clusters) ----
+  output$mapa <- renderLeaflet({
+    df <- datos_filtrados()
+    if (is.null(df)) {
+      return(leaflet() %>% addTiles() %>% setView(lng = -84.1, lat = 9.9, zoom = 7))
     }
     
-    df <- base_df()
-    if (!"Canton" %in% names(df)) df$Canton <- NA_character_
-    df <- df %>% mutate(CANTON_KEY = norm_key(Canton))
-    if (input$tipo_caso != "Todos") df <- df %>% filter(Casos == input$tipo_caso)
-    
-    resumen <- df %>%
-      group_by(CANTON_KEY) %>%
-      summarise(valor = sum(Animales_muestreados, na.rm = TRUE), .groups = "drop")
-    
-    shp <- cr_cantones %>% left_join(resumen, by = "CANTON_KEY")
-    pal <- colorNumeric("YlOrRd", domain = shp$valor, na.color = "#f0f0f0")
-    
-    crear_mapa(tipo = "fijo") %>%
-      addPolygons(
-        data = shp,
-        fillColor = ~pal(valor),
-        fillOpacity = 0.8,
-        color = "#666666",
-        weight = 0.5,
-        label = ~paste0(CANTON_KEY, ": ", ifelse(is.na(valor), "0", fmt_miles(valor)))
-      ) %>%
-      addLegend(
-        position = "bottomleft",
-        pal = pal,
-        values = shp$valor,
-        title = "Casos",
-        opacity = 0.9,
-        labFormat = labelFormat(digits = 0, big.mark = ","),
-        na.label = "Sin dato",
-        className = "leaflet-legend"
-      )
-  })
-  
-  # ===============================
-  # MAPA PUNTOS (fitBounds SOLO aquí)
-  # ===============================
-  output$map_pts <- renderLeaflet({
-    
-    df <- base_df()
-    if (input$tipo_caso != "Todos") df <- df %>% filter(Casos == input$tipo_caso)
-    
-    if (!(LAT_COL %in% names(df)) || !(LON_COL %in% names(df))) {
-      return(
-        crear_mapa(
-          tipo = "fijo",
-          mensaje_error = "No se encontraron columnas <b>Latitud</b> / <b>Longitud</b>."
-        )
-      )
+    if (is.null(input$col_lat) || is.null(input$col_lon) || input$col_lat == "" || input$col_lon == "") {
+      return(leaflet() %>% addTiles() %>% setView(lng = -84.1, lat = 9.9, zoom = 7))
     }
     
-    # Asegurar columnas para popup
-    if (!"Canton" %in% names(df)) df$Canton <- NA_character_
-    if (!"Distrito" %in% names(df)) df$Distrito <- NA_character_
-    if (!"Especie" %in% names(df)) df$Especie <- NA_character_
-    if (!"Casos" %in% names(df)) df$Casos <- NA_character_
-    if (!"Animales_muestreados" %in% names(df)) df$Animales_muestreados <- NA_real_
-    
-    df <- df %>%
+    dfm <- df %>%
       mutate(
-        lat = suppressWarnings(as.numeric(gsub(",", ".", as.character(.data[[LAT_COL]])))),
-        lon = suppressWarnings(as.numeric(gsub(",", ".", as.character(.data[[LON_COL]]))))
+        lat_raw = suppressWarnings(as.numeric(.data[[input$col_lat]])),
+        lon_raw = suppressWarnings(as.numeric(.data[[input$col_lon]]))
       ) %>%
       mutate(
-        lat = ifelse(!is.na(lat) & abs(lat) > 90,  lat / 1e6, lat),
-        lon = ifelse(!is.na(lon) & abs(lon) > 200, lon / 1e6, lon)
-      )
-    
-    # Corregir signo de longitud si viniera positiva
-    if (sum(!is.na(df$lon)) > 0 && stats::median(df$lon, na.rm = TRUE) > 0) df$lon <- -abs(df$lon)
-    
-    # Filtrar a CR (evita outliers)
-    df <- df %>%
-      filter(!is.na(lat), !is.na(lon), is.finite(lat), is.finite(lon)) %>%
-      filter(lat >= 5 & lat <= 12.5, lon >= -86.5 & lon <= -82.0)
-    
-    if (nrow(df) == 0) {
-      return(
-        crear_mapa(
-          tipo = "fijo",
-          mensaje_error = "No hay puntos válidos con los filtros actuales."
+        lat = case_when(
+          is.finite(lat_raw) & abs(lat_raw) > 90 ~ lat_raw / 10000,
+          TRUE ~ lat_raw
+        ),
+        lon = case_when(
+          is.finite(lon_raw) & abs(lon_raw) > 180 ~ lon_raw / 10000,
+          TRUE ~ lon_raw
         )
+      ) %>%
+      filter(is.finite(lat), is.finite(lon)) %>%
+      filter(lat >= -90, lat <= 90, lon >= -180, lon <= 180)
+    
+    if (nrow(dfm) == 0) {
+      return(
+        leaflet() %>% addTiles() %>% setView(lng = -84.1, lat = 9.9, zoom = 7) %>%
+          addPopups(lng = -84.1, lat = 9.9, popup = "No hay coordenadas válidas con el filtro actual.")
       )
     }
     
-    pal_pts <- colorFactor(
-      palette = c("NUEVOS" = "blue", "ACUMULADOS" = "red"),
-      domain = c("NUEVOS", "ACUMULADOS")
-    )
+    # tamaño por valor (Animales muestreados)
+    v <- dfm$valor
+    v[is.na(v)] <- 0
+    dfm$radio <- pmax(3, pmin(15, sqrt(v + 1)))
     
-    df$popup <- paste0(
-      "<b>Cantón:</b> ", ifelse(is.na(df$Canton), "ND", df$Canton), "<br>",
-      "<b>Distrito:</b> ", ifelse(is.na(df$Distrito), "ND", df$Distrito), "<br>",
-      "<b>Especie:</b> ", ifelse(is.na(df$Especie), "ND", df$Especie), "<br>",
-      "<b>Tipo de caso:</b> ", ifelse(is.na(df$Casos), "ND", df$Casos), "<br>",
-      "<b>Animales muestreados:</b> ", ifelse(is.na(df$Animales_muestreados), "0", fmt_miles(df$Animales_muestreados))
-    )
-    
-    crear_mapa(tipo = "base") %>%
-      fitBounds(
-        lng1 = min(df$lon, na.rm = TRUE),
-        lat1 = min(df$lat, na.rm = TRUE),
-        lng2 = max(df$lon, na.rm = TRUE),
-        lat2 = max(df$lat, na.rm = TRUE)
-      ) %>%
+    leaflet(dfm) %>%
+      addTiles() %>%
       addCircleMarkers(
-        data = df,
         lng = ~lon, lat = ~lat,
-        radius = 4,
-        stroke = TRUE, weight = 0.6, color = "#222222",
-        fillOpacity = 0.8,
-        fillColor = ~pal_pts(Casos),
-        popup = ~popup
+        radius = ~radio,
+        stroke = FALSE,
+        fillOpacity = 0.75,
+        popup = ~paste0(
+          "<b>Año:</b> ", anio,
+          "<br><b>Semana:</b> ", semana,
+          "<br><b>", input$col_valor, ":</b> ", format(valor, big.mark = ",", scientific = FALSE)
+        ),
+        clusterOptions = markerClusterOptions()
       ) %>%
-      addLegend(
-        position = "bottomleft",
-        pal = pal_pts,
-        values = c("NUEVOS", "ACUMULADOS"),
-        title = "Tipo de caso",
-        opacity = 1,
-        className = "leaflet-legend"
+      fitBounds(
+        lng1 = min(dfm$lon, na.rm = TRUE),
+        lat1 = min(dfm$lat, na.rm = TRUE),
+        lng2 = max(dfm$lon, na.rm = TRUE),
+        lat2 = max(dfm$lat, na.rm = TRUE)
       )
   })
+  
+  # ---- Descargar ----
+  output$descargar <- downloadHandler(
+    filename = function() paste0("datos_filtrados_", Sys.Date(), ".csv"),
+    content = function(file) {
+      df <- datos_filtrados()
+      if (is.null(df)) {
+        write.csv(data.frame(), file, row.names = FALSE, fileEncoding = "UTF-8")
+      } else {
+        write.csv(df, file, row.names = FALSE, fileEncoding = "UTF-8")
+      }
+    }
+  )
 }
 
-shinyApp(ui, serve
+shinyApp(ui, server)
