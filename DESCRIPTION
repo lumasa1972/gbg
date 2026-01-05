@@ -23,4 +23,4 @@ Imports:
     leaflet (>= 2.1.0)
 Suggests:
     readxl (>= 1.4.0)
-RoxygenNote: 7.0.0
+RoxygenNote: 7.3.0

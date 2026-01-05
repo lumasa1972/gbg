@@ -77,7 +77,7 @@ R -e "shiny::runApp('app.R')"
 ## Datos de Ejemplo
 
 El repositorio incluye:
-- `Base_datos_semana_50-25.csv`: Datos de ejemplo de vigilancia epidemiológica (semana 50 de 2024 a semana inicial de 2025)
+- `Base_datos_semana_50-25.csv`: Datos de ejemplo de vigilancia epidemiológica (desde semana 50 de 2024 hasta inicios de 2025)
 - `data/Cantones_de_Costa_Rica/`: Shapefiles de cantones de Costa Rica
 
 ## Estructura del Proyecto
