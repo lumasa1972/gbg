@@ -1,11 +1,26 @@
-# ==============================
+# ============================================================================
 # APP SHINY – DASHBOARD COMPLETO (VIGILANCIA EPIDEMIOLÓGICA)
-# - Indicador principal recomendado: "Animales muestreados"
-# - CSV ; o , (auto-detección) + Excel
-# - Diagnóstico + Vista previa
-# - Selectores dinámicos
-# - Mapa con auto-corrección de coordenadas + clusters
-# ==============================
+# ============================================================================
+# 
+# Descripción:
+#   Dashboard interactivo para análisis de vigilancia epidemiológica en
+#   Costa Rica. Permite cargar, filtrar, analizar y visualizar datos
+#   epidemiológicos con gráficos temporales y mapas interactivos.
+#
+# Características principales:
+#   - Indicador principal recomendado: "Animales muestreados"
+#   - Carga de datos: CSV (con auto-detección de delimitadores ; o ,) y Excel
+#   - Diagnóstico automático de columnas + Vista previa de datos
+#   - Selectores dinámicos de columnas (año, semana, indicador)
+#   - Filtros interactivos por año y rango de semanas
+#   - Visualizaciones: series temporales, mapas con clusters
+#   - Mapa con auto-corrección de coordenadas geográficas
+#   - Exportación de datos filtrados
+#
+# Autor: Mariano Arroyo <marianoarroyo@gmail.com>
+# Versión: 0.1.0
+# Licencia: MIT
+# ============================================================================
 
 library(shiny)
 library(bslib)

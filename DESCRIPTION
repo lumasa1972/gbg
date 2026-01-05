@@ -1,8 +1,26 @@
 Package: gbg
-Title: Dashboard GBG Analysis
-Version: 0.0.0.9000
-Author: Tu Nombre <mariano>
-Maintainer: Tu Nombre <marianoarroyo@gmail.com>
-Description: Herramientas para generar dashboards utilizando R.
-License: MIT
+Title: Dashboard de Vigilancia Epidemiológica GBG
+Version: 0.1.0
+Authors@R: person("Mariano", "Arroyo", email = "marianoarroyo@gmail.com", role = c("aut", "cre"))
+Maintainer: Mariano Arroyo <marianoarroyo@gmail.com>
+Description: Dashboard interactivo desarrollado con Shiny para el análisis y 
+    visualización de datos de vigilancia epidemiológica. Permite cargar datos 
+    en formato CSV o Excel, realizar análisis temporal y espacial, y generar 
+    visualizaciones interactivas incluyendo gráficos de series temporales y 
+    mapas con clusters geográficos. Optimizado para datos de muestreo de 
+    animales en Costa Rica.
+License: MIT + file LICENSE
+Encoding: UTF-8
 LazyData: true
+Depends:
+    R (>= 4.0.0)
+Imports:
+    shiny (>= 1.7.0),
+    bslib (>= 0.5.0),
+    dplyr (>= 1.0.0),
+    ggplot2 (>= 3.4.0),
+    readr (>= 2.1.0),
+    leaflet (>= 2.1.0)
+Suggests:
+    readxl (>= 1.4.0)
+RoxygenNote: 7.3.0
